@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Type-a-Grill — demo harness</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: system-ui, sans-serif; margin: 0; background: #101014; color: #eee; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #9a9aa5; font-size: 13px; margin-bottom: 18px; }
+  textarea { width: 100%; box-sizing: border-box; min-height: 74px; border-radius: 10px; border: 1px solid #33333d;
+    background: #18181f; color: #eee; padding: 10px 12px; font-size: 15px; }
+  button { margin-top: 10px; background: #d9ad45; color: #191204; border: 0; border-radius: 8px;
+    padding: 10px 18px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; }
+  .examples { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .examples button { margin: 0; background: #22222b; color: #cfcfda; font-weight: 400; font-size: 12.5px; padding: 6px 10px; }
+  section { margin-top: 26px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: #9a9aa5; margin: 0 0 10px; }
+  .arch { display: grid; grid-template-columns: repeat(16, 1fr); gap: 4px; margin-bottom: 6px; }
+  .tooth { aspect-ratio: 0.78; border-radius: 6px 6px 9px 9px; border: 1px solid #3a3a46; background: #f4f1ea;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+    font-size: 8.5px; color: #555; overflow: hidden; text-align: center; }
+  .tooth.covered { color: #1c1c22; font-weight: 700; border-color: #00000055; }
+  .tooth .tag { font-size: 7.5px; font-weight: 600; opacity: .75; }
+  .archlabel { font-size: 11px; color: #9a9aa5; margin: 2px 0 4px; }
+  pre { background: #18181f; border: 1px solid #2c2c36; border-radius: 10px; padding: 12px; overflow: auto;
+    font-size: 12px; max-height: 320px; }
+  .flag { display: inline-block; background: #4a2f10; color: #f2b25c; border: 1px solid #7a5216;
+    border-radius: 999px; padding: 3px 10px; font-size: 12.5px; margin: 0 6px 6px 0; }
+  .meta { font-size: 14px; line-height: 1.55; }
+  .muted { color: #9a9aa5; font-size: 12.5px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Type-a-Grill</h1>
+  <div class="sub">Plain-language grillz order in → validated build configuration out. Mock mode until Ember credits land (no API spend).</div>
+
+  <textarea id="input" placeholder="try: bottom six silver and the top rose gold"></textarea>
+  <div>
+    <button id="go">Parse</button>
+  </div>
+  <div class="examples" id="examples"></div>
+
+  <section id="out" hidden>
+    <h2>Tooth map</h2>
+    <div class="archlabel">top</div>
+    <div class="arch" id="top"></div>
+    <div class="archlabel">bottom</div>
+    <div class="arch" id="bottom"></div>
+    <div class="meta" id="meta"></div>
+    <div id="flags"></div>
+    <h2 style="margin-top:22px">Configuration JSON</h2>
+    <pre id="json"></pre>
+    <h2 style="margin-top:22px">Attempt trace</h2>
+    <pre id="trace"></pre>
+  </section>
+</main>
+
+<script>
+  // Metal swatches mirror the production catalog in src/renderSpec.ts.
+  const SWATCH = { yellow: '#d9ad45', white: '#e4e2da', rose: '#c28b83', silver: '#c9cdd1', platinum: '#bec5c9' };
+  const TAG = { 'open-face': 'OPEN', 'diamond-cut': 'D-CUT', 'diamond-dust': 'DUST', engraving: 'ENGR', opals: 'OPAL', solid: '' };
+  const EXAMPLES = [
+    '6x6 all open faced',
+    'bottom 8 in 14k yellow gold, solid',
+    'i want a full set, top and bottom 8, silver',
+    '6 by 6 but like NOT gold, the other one, and the see-through style on the bottoms only',
+    'how much for 10 top 10 bottom all diamonds vvs',
+  ];
+  const $ = (id) => document.getElementById(id);
+  for (const ex of EXAMPLES) {
+    const b = document.createElement('button');
+    b.textContent = ex;
+    b.onclick = () => { $('input').value = ex; parse(); };
+    $('examples').appendChild(b);
+  }
+
+  function renderArch(el, teeth, base) {
+    el.innerHTML = '';
+    const byIndex = new Map(teeth.map((t) => [t.index, t]));
+    for (let i = 0; i < 16; i++) {
+      const t = byIndex.get(base + i);
+      const d = document.createElement('div');
+      d.className = 'tooth' + (t ? ' covered' : '');
+      if (t) {
+        d.style.background = SWATCH[t.metal] || '#ddd';
+        d.title = JSON.stringify(t);
+        const label = t.type === 'iced' ? 'ICED' : (TAG[t.style] || '');
+        d.innerHTML = `<span>${t.metal === 'silver' || t.metal === 'platinum' ? t.metal.slice(0, 4) : t.karat}</span>` +
+          (label ? `<span class="tag">${label}</span>` : '');
+      }
+      el.appendChild(d);
+    }
+  }
+
+  async function parse() {
+    const text = $('input').value.trim();
+    if (!text) return;
+    $('go').disabled = true;
+    try {
+      const res = await fetch('/parse', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text }) });
+      const data = await res.json();
+      $('out').hidden = false;
+      renderArch($('top'), data.spec?.teeth ?? [], 0);
+      renderArch($('bottom'), data.spec?.teeth ?? [], 16);
+      $('meta').innerHTML = data.spec
+        ? `<div>${data.description}</div><div>sample price: <b>$${data.price}</b> · mode: ${data.mode}</div>`
+        : `<div>${data.flagged ? 'Parser flagged this order instead of guessing.' : 'No valid configuration: ' + (data.error || 'parse failed')}</div>`;
+      $('flags').innerHTML = (data.unsupported || []).map((u) => `<span class="flag">unsupported: ${u}</span>`).join('');
+      $('json').textContent = JSON.stringify(data.spec ?? { flagged: data.flagged, unsupported: data.unsupported }, null, 2);
+      $('trace').textContent = (data.attempts || [])
+        .map((a) => `attempt ${a.attempt}: ${a.valid ? 'valid' : 'invalid — ' + a.errors.join('; ')}${a.usage ? ` (${a.usage.inputTokens} in / ${a.usage.outputTokens} out)` : ''}`)
+        .join('\n');
+    } finally {
+      $('go').disabled = false;
+    }
+  }
+  $('go').onclick = parse;
+</script>
+</body>
+</html>
